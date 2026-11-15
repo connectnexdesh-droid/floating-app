@@ -1,13 +1,15 @@
 # FloatClip
 
-FloatClip is an Android floating clipboard utility with a sequential Quick Text queue, separate A and C clipboard sheets, and a local TOTP authenticator.
+FloatClip is an Android floating clipboard utility with two sequential Quick Text queues, a four-column clipboard sheet, and a local TOTP authenticator.
 
 ## Features
 
-- Floating overlay with five actions: Copy Next, Save to A, Save to C, Generate 2FA, and Close.
-- Quick Text sheet supports add, edit, delete, reorder, and sequential copy.
-- A and C sheets append each captured clipboard text as a new row. Existing rows are retained.
-- Saved rows can be copied, edited, and deleted.
+- Floating overlay with TXT1, TXT2, A, B, C, 2FA, and Close actions (A/B/C can be shown or hidden in settings).
+- Quick Text has two independent queues: TXT1 and TXT2. Each supports its own saved rows and sequential copy position.
+- Tap TXT1 or TXT2 once to copy the next row. Tap the same button twice within one second to repeat the last copied row.
+- The Quick Text sheet marks the last copied row with a star. Hold a row number and slide up or down to select multiple rows; slide across a selected row to toggle it off.
+- Clipboard Sheet keeps four columns (A–D). The floating A/B/C buttons show the next target row (for example A1, B2, C3) and advance as entries are saved.
+- Quick Text and Clipboard Sheet support multi-row delete, Undo, and Redo. Cell edits, paste operations, and purge operations are also undoable.
 - Room database persists text locally.
 - RFC 6238 TOTP generation uses the secret currently on the clipboard; the secret is not saved by FloatClip.
 - No backend, analytics, or network permission is used by the app.
@@ -24,13 +26,12 @@ The included Gradle launcher scripts bootstrap Gradle 8.10.2 if Gradle is not al
 
 ## Using the bubble
 
-- **1 · Copy Next:** Copies the next Quick Text entry. It loops to the first item after the last one.
-- **2 · Save to A:** Appends the current clipboard text to A Sheet.
-- **3 · Save to C:** Appends the current clipboard text to C Sheet.
-- **4 · Generate 2FA:** Reads a Base32 TOTP secret from the clipboard, generates a six-digit code, and copies it.
-- **5 · Close Bubble:** Stops the floating service. Start it again from the main app.
+- **TXT1 / TXT2:** Each button copies the next item from its own queue and loops to the first item after the last one. A second tap on the same button within one second repeats the row that was just copied.
+- **A / B / C:** Saves the current clipboard text to the first empty cell in that column. The button label shows the next target row, such as A1 or C3.
+- **2FA:** Reads a Base32 TOTP secret from the clipboard, generates a six-digit code, and copies it.
+- **Close:** Stops the floating service. Start it again from the main app.
 
-Quick Text order is based on a stable database ID and position. The last copied ID is remembered, so reordering or deleting entries does not leave the queue tied to a fragile list index.
+Quick Text order is based on a stable database ID and position. TXT1 and TXT2 keep separate last-copied IDs, so their sequential queues do not interfere with each other.
 
 ## Security notes
 

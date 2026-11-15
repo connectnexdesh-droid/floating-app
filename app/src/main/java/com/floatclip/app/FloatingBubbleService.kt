@@ -16,6 +16,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -221,6 +222,7 @@ class FloatingBubbleService : Service() {
                         if (!moved) {
                             val opening = panel.visibility != View.VISIBLE
                             panel.visibility = if (opening) View.VISIBLE else View.GONE
+                            if (opening) updateClipboardButtonLabels()
 
                             // WRAP_CONTENT can keep the old narrow overlay width after a
                             // GONE panel becomes visible on some Android launchers.
@@ -291,9 +293,14 @@ class FloatingBubbleService : Service() {
             panel.removeAllViews()
             actionButtons = createActionButtons()
             actionButtons.forEach(panel::addView)
+            updateClipboardButtonLabels()
         }
         actionButtons.forEach { button ->
-            button.textSize = (size * if (button.text == "2FA") 0.22f else 0.27f).coerceIn(11f, 20f)
+            button.textSize = (size * when {
+                button.text == "2FA" -> 0.22f
+                button.text.length > 2 -> 0.19f
+                else -> 0.27f
+            }).coerceIn(10f, 20f)
             button.background = glassButtonBackground()
             val params = button.layoutParams as? LinearLayout.LayoutParams
                 ?: LinearLayout.LayoutParams(dp(size), dp(size))
@@ -314,17 +321,18 @@ class FloatingBubbleService : Service() {
 
     private fun createActionButtons(): List<TextView> {
         val buttons = mutableListOf(
-            actionButton("TXT", "#EC4899") { copyNextQuickText() },
+            actionButton("TXT1", "#EC4899") { onQuickTextButtonTap(1) },
+            actionButton("TXT2", "#EC4899") { onQuickTextButtonTap(2) },
             actionButton("2FA", "#22D3EE") { generateAndCopyTotp() }
         )
         if (preferences.getBoolean(KEY_SHOW_BUTTON_A, true)) {
-            buttons.add(actionButton("A", "#EC4899") { saveClipboardTo("A") })
+            buttons.add(actionButton("A1", "#EC4899") { saveClipboardTo("A") })
         }
         if (preferences.getBoolean(KEY_SHOW_BUTTON_B, true)) {
-            buttons.add(actionButton("B", "#EC4899") { saveClipboardTo("B") })
+            buttons.add(actionButton("B1", "#EC4899") { saveClipboardTo("B") })
         }
         if (preferences.getBoolean(KEY_SHOW_BUTTON_C, true)) {
-            buttons.add(actionButton("C", "#EC4899") { saveClipboardTo("C") })
+            buttons.add(actionButton("C1", "#EC4899") { saveClipboardTo("C") })
         }
         buttons.add(actionButton("💔", "#F87171") { stopSelf() })
         return buttons
@@ -334,7 +342,11 @@ class FloatingBubbleService : Service() {
         val size = bubbleSizeDp()
         return TextView(this).apply {
             text = label
-            textSize = (size * if (label == "2FA") 0.22f else 0.27f).coerceIn(11f, 20f)
+            textSize = (size * when {
+                label == "2FA" -> 0.22f
+                label.length > 2 -> 0.19f
+                else -> 0.27f
+            }).coerceIn(10f, 20f)
             setTextColor(Color.parseColor(color))
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 0)
@@ -342,12 +354,13 @@ class FloatingBubbleService : Service() {
             isClickable = true
             isFocusable = true
             elevation = dp(5).toFloat()
-            contentDescription = when (label) {
-                "TXT" -> "Copy next Quick Text"
-                "2FA" -> "Generate and copy 2FA code"
-                "A" -> "Save clipboard text to Column A"
-                "B" -> "Save clipboard text to Column B"
-                "C" -> "Save clipboard text to Column C"
+            contentDescription = when {
+                label == "TXT1" -> "Copy next Quick Text from TXT1"
+                label == "TXT2" -> "Copy next Quick Text from TXT2"
+                label == "2FA" -> "Generate and copy 2FA code"
+                label.startsWith("A") -> "Save clipboard text to Column A"
+                label.startsWith("B") -> "Save clipboard text to Column B"
+                label.startsWith("C") -> "Save clipboard text to Column C"
                 else -> "Close FloatClip bubble"
             }
             setOnClickListener { action() }
@@ -357,25 +370,69 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun copyNextQuickText() {
+    private val lastQuickTextTapAt = mutableMapOf<Int, Long>()
+
+    private fun onQuickTextButtonTap(queue: Int) {
+        val now = SystemClock.elapsedRealtime()
+        val previousTap = lastQuickTextTapAt[queue]
+        val replayPrevious = previousTap != null && now - previousTap <= 1_000L
+        lastQuickTextTapAt[queue] = now
+        copyQuickText(queue, replayPrevious)
+    }
+
+    private fun quickTextPreferenceKey(queue: Int): String =
+        if (queue == 1) KEY_LAST_QUICK_TEXT_ID else KEY_LAST_QUICK_TEXT_ID_2
+
+    private fun copyQuickText(queue: Int, replayPrevious: Boolean) {
         serviceScope.launch {
             quickCopyMutex.withLock {
-                val items = database.dao().getQuickTextsOnce().filter { it.content.isNotBlank() }
+                val dao = database.dao()
+                val items = dao.getQuickTextsOnce(queue).filter { it.content.isNotBlank() }
                 if (items.isEmpty()) {
                     withContext(Dispatchers.Main) {
-                        ClipboardTools.toast(this@FloatingBubbleService, "Quick Text is empty. Add text in FloatClip first.")
+                        ClipboardTools.toast(this@FloatingBubbleService, "TXT$queue is empty. Add text in FloatClip first.")
                     }
                     return@withLock
                 }
-
-                val lastId = preferences.getLong(KEY_LAST_QUICK_TEXT_ID, -1L)
+                val key = quickTextPreferenceKey(queue)
+                val lastId = preferences.getLong(key, -1L)
                 val lastIndex = items.indexOfFirst { it.id == lastId }
-                val next = items[(lastIndex + 1) % items.size]
-
+                val target = if (replayPrevious && lastIndex >= 0) items[lastIndex]
+                    else items[(lastIndex + 1) % items.size]
                 withContext(Dispatchers.Main) {
-                    ClipboardTools.copyText(this@FloatingBubbleService, next.title, next.content)
-                    preferences.edit().putLong(KEY_LAST_QUICK_TEXT_ID, next.id).apply()
-                    ClipboardTools.toast(this@FloatingBubbleService, "Copied: " + next.title)
+                    ClipboardTools.copyText(this@FloatingBubbleService, target.title, target.content)
+                    preferences.edit().putLong(key, target.id).apply()
+                    ClipboardTools.toast(
+                        this@FloatingBubbleService,
+                        if (replayPrevious) "Repeated: " + target.title else "TXT" + queue + " copied: " + target.title
+                    )
+                }
+                dao.setQuickTextLastCopied(queue, target.id)
+            }
+        }
+    }
+
+    private fun updateClipboardButtonLabels() {
+        serviceScope.launch {
+            val rows = database.dao().getClipboardSheetOnce()
+            withContext(Dispatchers.Main) {
+                actionButtons.forEach { button ->
+                    val slot = when (button.contentDescription?.toString()) {
+                        "Save clipboard text to Column A" -> "A"
+                        "Save clipboard text to Column B" -> "B"
+                        "Save clipboard text to Column C" -> "C"
+                        else -> null
+                    } ?: return@forEach
+                    val firstEmpty = rows.indexOfFirst { row ->
+                        when (slot) {
+                            "A" -> row.colA.isBlank()
+                            "B" -> row.colB.isBlank()
+                            else -> row.colC.isBlank()
+                        }
+                    }
+                    val nextLabel = slot + (if (firstEmpty >= 0) firstEmpty + 1 else rows.size + 1)
+                    button.text = nextLabel
+                    button.textSize = (bubbleSizeDp() * if (nextLabel.length > 2) 0.19f else 0.27f).coerceIn(10f, 20f)
                 }
             }
         }
@@ -468,6 +525,7 @@ class FloatingBubbleService : Service() {
                         }
                     }
                 }
+                updateClipboardButtonLabels()
                 ClipboardTools.toast(
                     this@FloatingBubbleService,
                     "Saved to Clipboard Sheet, column $slot."
@@ -546,6 +604,7 @@ class FloatingBubbleService : Service() {
         private const val CHANNEL_ID = "floatclip_bubble"
         private const val NOTIFICATION_ID = 4102
         private const val KEY_LAST_QUICK_TEXT_ID = "last_quick_text_id"
+        private const val KEY_LAST_QUICK_TEXT_ID_2 = "last_quick_text_id_2"
         const val ACTION_APPLY_SETTINGS = "com.floatclip.app.ACTION_APPLY_BUBBLE_SETTINGS"
         private const val KEY_BUBBLE_SIZE_DP = "bubble_size_dp"
         private const val KEY_BUBBLE_OPACITY_PERCENT = "bubble_opacity_percent"

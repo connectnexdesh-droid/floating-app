@@ -100,8 +100,11 @@ class MainActivity : ComponentActivity() {
 private fun FloatClipScreen(database: FloatClipDatabase) {
     val context = LocalContext.current
     val dao = remember(database) { database.dao() }
-    val quickTexts by dao.observeQuickTexts().collectAsState(initial = emptyList())
+    val quickTexts by dao.observeQuickTexts(1).collectAsState(initial = emptyList())
+    val quickTexts2 by dao.observeQuickTexts(2).collectAsState(initial = emptyList())
     val clipboardItems by dao.observeClipboardSheet().collectAsState(initial = emptyList())
+    val history = remember { FloatClipHistory() }
+    var selectedQuickTextQueue by remember { mutableStateOf(1) }
     var selectedTab by remember { mutableStateOf(0) }
 
     Column(
@@ -154,8 +157,31 @@ private fun FloatClipScreen(database: FloatClipDatabase) {
 
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             when (selectedTab) {
-                0 -> QuickTextSpreadsheet(quickTexts, dao)
-                1 -> ClipboardSheetSpreadsheet(clipboardItems, dao)
+                0 -> Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { selectedQuickTextQueue = 1 },
+                            modifier = Modifier.weight(1f),
+                            enabled = selectedQuickTextQueue != 1
+                        ) { Text("TXT1") }
+                        Button(
+                            onClick = { selectedQuickTextQueue = 2 },
+                            modifier = Modifier.weight(1f),
+                            enabled = selectedQuickTextQueue != 2
+                        ) { Text("TXT2") }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (selectedQuickTextQueue == 1) {
+                            QuickTextSpreadsheet(quickTexts, dao, queue = 1, history = history)
+                        } else {
+                            QuickTextSpreadsheet(quickTexts2, dao, queue = 2, history = history)
+                        }
+                    }
+                }
+                1 -> ClipboardSheetSpreadsheet(clipboardItems, dao, history)
                 2 -> TwoFactorSheet()
                 else -> BubbleSettingsScreen()
             }
