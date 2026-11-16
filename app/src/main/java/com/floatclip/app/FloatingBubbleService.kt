@@ -320,11 +320,17 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createActionButtons(): List<TextView> {
-        val buttons = mutableListOf(
-            actionButton("TXT1", "#EC4899") { onQuickTextButtonTap(1) },
-            actionButton("TXT2", "#EC4899") { onQuickTextButtonTap(2) },
-            actionButton("2FA", "#22D3EE") { generateAndCopyTotp() }
-        )
+        val buttons = mutableListOf<TextView>()
+        if (preferences.getBoolean(KEY_SHOW_TXT1_BUTTON, true)) {
+            buttons.add(actionButton("TXT1", "#EC4899") { onQuickTextButtonTap(1) })
+        }
+        if (preferences.getBoolean(KEY_SHOW_TXT2_BUTTON, true)) {
+            buttons.add(actionButton("TXT2", "#EC4899") { onQuickTextButtonTap(2) })
+        }
+        if (preferences.getBoolean(KEY_SHOW_TXT3_BUTTON, true)) {
+            buttons.add(actionButton("TXT3", "#EC4899") { onQuickTextButtonTap(3) })
+        }
+        buttons.add(actionButton("2FA", "#22D3EE") { generateAndCopyTotp() })
         if (preferences.getBoolean(KEY_SHOW_BUTTON_A, true)) {
             buttons.add(actionButton("A1", "#EC4899") { saveClipboardTo("A") })
         }
@@ -380,8 +386,11 @@ class FloatingBubbleService : Service() {
         copyQuickText(queue, replayPrevious)
     }
 
-    private fun quickTextPreferenceKey(queue: Int): String =
-        if (queue == 1) KEY_LAST_QUICK_TEXT_ID else KEY_LAST_QUICK_TEXT_ID_2
+    private fun quickTextPreferenceKey(queue: Int): String = when (queue) {
+        1 -> KEY_LAST_QUICK_TEXT_ID
+        2 -> KEY_LAST_QUICK_TEXT_ID_2
+        else -> KEY_LAST_QUICK_TEXT_ID_3
+    }
 
     private fun copyQuickText(queue: Int, replayPrevious: Boolean) {
         serviceScope.launch {
@@ -610,12 +619,16 @@ class FloatingBubbleService : Service() {
         private const val NOTIFICATION_ID = 4102
         private const val KEY_LAST_QUICK_TEXT_ID = "last_quick_text_id"
         private const val KEY_LAST_QUICK_TEXT_ID_2 = "last_quick_text_id_2"
+        private const val KEY_LAST_QUICK_TEXT_ID_3 = "last_quick_text_id_3"
         const val ACTION_APPLY_SETTINGS = "com.floatclip.app.ACTION_APPLY_BUBBLE_SETTINGS"
         private const val KEY_BUBBLE_SIZE_DP = "bubble_size_dp"
         private const val KEY_BUBBLE_OPACITY_PERCENT = "bubble_opacity_percent"
         private const val KEY_SHOW_BUTTON_A = "show_bubble_button_a"
         private const val KEY_SHOW_BUTTON_B = "show_bubble_button_b"
         private const val KEY_SHOW_BUTTON_C = "show_bubble_button_c"
+        private const val KEY_SHOW_TXT1_BUTTON = "show_bubble_txt1"
+        private const val KEY_SHOW_TXT2_BUTTON = "show_bubble_txt2"
+        private const val KEY_SHOW_TXT3_BUTTON = "show_bubble_txt3"
         private const val DEFAULT_BUBBLE_SIZE_DP = 58
         private const val DEFAULT_BUBBLE_OPACITY_PERCENT = 75
         private const val ROOT_HORIZONTAL_PADDING_DP = 8

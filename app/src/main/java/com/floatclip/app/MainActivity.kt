@@ -102,6 +102,7 @@ private fun FloatClipScreen(database: FloatClipDatabase) {
     val dao = remember(database) { database.dao() }
     val quickTexts by dao.observeQuickTexts(1).collectAsState(initial = emptyList())
     val quickTexts2 by dao.observeQuickTexts(2).collectAsState(initial = emptyList())
+    val quickTexts3 by dao.observeQuickTexts(3).collectAsState(initial = emptyList())
     val clipboardItems by dao.observeClipboardSheet().collectAsState(initial = emptyList())
     val history = remember { FloatClipHistory() }
     var selectedQuickTextQueue by remember { mutableStateOf(1) }
@@ -172,12 +173,17 @@ private fun FloatClipScreen(database: FloatClipDatabase) {
                             modifier = Modifier.weight(1f),
                             enabled = selectedQuickTextQueue != 2
                         ) { Text("TXT2") }
+                        Button(
+                            onClick = { selectedQuickTextQueue = 3 },
+                            modifier = Modifier.weight(1f),
+                            enabled = selectedQuickTextQueue != 3
+                        ) { Text("TXT3") }
                     }
                     Box(modifier = Modifier.weight(1f)) {
-                        if (selectedQuickTextQueue == 1) {
-                            QuickTextSpreadsheet(quickTexts, dao, queue = 1, history = history)
-                        } else {
-                            QuickTextSpreadsheet(quickTexts2, dao, queue = 2, history = history)
+                        when (selectedQuickTextQueue) {
+                            1 -> QuickTextSpreadsheet(quickTexts, dao, queue = 1, history = history)
+                            2 -> QuickTextSpreadsheet(quickTexts2, dao, queue = 2, history = history)
+                            else -> QuickTextSpreadsheet(quickTexts3, dao, queue = 3, history = history)
                         }
                     }
                 }
@@ -201,6 +207,9 @@ private fun BubbleSettingsScreen() {
     var showAButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_a", true)) }
     var showBButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_b", true)) }
     var showCButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_c", true)) }
+    var showTxt1Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt1", true)) }
+    var showTxt2Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt2", true)) }
+    var showTxt3Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt3", true)) }
     val previewColor = Color(0xFF2563EB).copy(alpha = bubbleOpacity / 100f)
 
     Column(
@@ -293,6 +302,33 @@ private fun BubbleSettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        listOf(
+            Triple("TXT1", "Quick Text queue 1", showTxt1Button),
+            Triple("TXT2", "Quick Text queue 2", showTxt2Button),
+            Triple("TXT3", "Quick Text queue 3", showTxt3Button)
+        ).forEachIndexed { index, item ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(item.first, fontWeight = FontWeight.SemiBold)
+                    Text(item.second, style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = item.third,
+                    onCheckedChange = { enabled ->
+                        when (index) {
+                            0 -> showTxt1Button = enabled
+                            1 -> showTxt2Button = enabled
+                            else -> showTxt3Button = enabled
+                        }
+                    }
+                )
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -335,6 +371,9 @@ private fun BubbleSettingsScreen() {
                     .putBoolean("show_bubble_button_a", showAButton)
                     .putBoolean("show_bubble_button_b", showBButton)
                     .putBoolean("show_bubble_button_c", showCButton)
+                    .putBoolean("show_bubble_txt1", showTxt1Button)
+                    .putBoolean("show_bubble_txt2", showTxt2Button)
+                    .putBoolean("show_bubble_txt3", showTxt3Button)
                     .apply()
                 context.sendBroadcast(
                     Intent(FloatingBubbleService.ACTION_APPLY_SETTINGS)
