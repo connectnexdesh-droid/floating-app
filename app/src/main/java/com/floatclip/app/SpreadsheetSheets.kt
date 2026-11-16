@@ -6,7 +6,9 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -38,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +65,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import kotlin.math.floor
 
 private val GridLine = Color(0xFFB8C2C7)
 private val GridText = Color(0xFF202124)
@@ -319,30 +324,19 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
             onSelectColumn = selectColumn
         )
 
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f).pointerInput(items) {
-            var lastDraggedId: Long? = null
-            detectDragGesturesAfterLongPress(
-                onDragStart = { offset ->
-                    lastDraggedId = listState.layoutInfo.visibleItemsInfo.firstOrNull { offset.y >= it.offset && offset.y < it.offset + it.size }?.index?.let { row -> items.getOrNull(row)?.id?.takeIf { it > 0L } }
-                    lastDraggedId?.let(toggleSelectedRow)
-                },
-                onDrag = { change, _ ->
-                    val currentId = listState.layoutInfo.visibleItemsInfo.firstOrNull { change.position.y >= it.offset && change.position.y < it.offset + it.size }?.index?.let { row -> items.getOrNull(row)?.id?.takeIf { it > 0L } }
-                    if (currentId != lastDraggedId) { lastDraggedId = currentId; currentId?.let(toggleSelectedRow) }
-                    change.consume()
-                },
-                onDragEnd = { lastDraggedId = null }, onDragCancel = { lastDraggedId = null }
-            )
-        }) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f)) {
             itemsIndexed(rows, key = { index, _ -> index }) { index, item ->
                 val rowSelected = item.id > 0L && selectedRowIds.contains(item.id)
                 Row(verticalAlignment = Alignment.Top) {
                     SpreadsheetRowNumber(
                         number = index + 1,
+                        rowIndex = index,
+                        rowCount = rows.size,
                         color = palette.rowHeader,
                         selected = selection.wholeRow == index || rowSelected,
                         lastCopied = item.lastCopied,
-                        onClick = { if (item.id > 0L) toggleSelectedRow(item.id) }
+                        onClick = { if (item.id > 0L) toggleSelectedRow(item.id) },
+                        onLongPressDrag = { target -> rows.getOrNull(target)?.id?.let(toggleSelectedRow) }
                     )
                     Row(modifier = Modifier.horizontalScroll(horizontalState)) {
                         SpreadsheetCell(
@@ -611,29 +605,18 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
             onSelectColumn = selectColumn
         )
 
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f).pointerInput(items) {
-            var lastDraggedId: Long? = null
-            detectDragGesturesAfterLongPress(
-                onDragStart = { offset ->
-                    lastDraggedId = listState.layoutInfo.visibleItemsInfo.firstOrNull { offset.y >= it.offset && offset.y < it.offset + it.size }?.index?.let { row -> items.getOrNull(row)?.id?.takeIf { it > 0L } }
-                    lastDraggedId?.let(toggleSelectedRow)
-                },
-                onDrag = { change, _ ->
-                    val currentId = listState.layoutInfo.visibleItemsInfo.firstOrNull { change.position.y >= it.offset && change.position.y < it.offset + it.size }?.index?.let { row -> items.getOrNull(row)?.id?.takeIf { it > 0L } }
-                    if (currentId != null && currentId != lastDraggedId) { lastDraggedId = currentId; toggleSelectedRow(currentId) }
-                    change.consume()
-                },
-                onDragEnd = { lastDraggedId = null }, onDragCancel = { lastDraggedId = null }
-            )
-        }) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f)) {
             itemsIndexed(rows, key = { index, _ -> index }) { index, item ->
                 val rowSelected = item.id > 0L && selectedRowIds.contains(item.id)
                 Row(verticalAlignment = Alignment.Top) {
                     SpreadsheetRowNumber(
                         number = index + 1,
+                        rowIndex = index,
+                        rowCount = rows.size,
                         color = palette.rowHeader,
                         selected = selection.wholeRow == index || rowSelected,
-                        onClick = { if (item.id > 0L) toggleSelectedRow(item.id) }
+                        onClick = { if (item.id > 0L) toggleSelectedRow(item.id) },
+                        onLongPressDrag = { target -> rows.getOrNull(target)?.id?.let(toggleSelectedRow) }
                     )
                     Row(modifier = Modifier.horizontalScroll(horizontalState)) {
                         for (column in 0..3) {
@@ -876,15 +859,47 @@ private fun SpreadsheetHeader(
 @Composable
 private fun SpreadsheetRowNumber(
     number: Int,
+    rowIndex: Int,
+    rowCount: Int,
     color: Color,
     selected: Boolean,
     lastCopied: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPressDrag: (Int) -> Unit
 ) {
+    val density = LocalDensity.current
+    val rowHeightPx = with(density) { 56.dp.toPx() }
+    val currentOnLongPressDrag by rememberUpdatedState(onLongPressDrag)
     Box(
         modifier = Modifier.width(42.dp).height(56.dp)
             .background(if (selected) Color(0xFF1A73E8) else if (lastCopied) Color(0xFF0F766E) else color)
             .border(if (selected || lastCopied) 3.dp else 1.dp, if (selected) Color(0xFF0D47A1) else if (lastCopied) Color(0xFF115E59) else GridLine)
+            .pointerInput(rowIndex, rowCount, rowHeightPx) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val longPress = awaitLongPressOrCancellation(down.id)
+                    if (longPress != null) {
+                        var lastRow = rowIndex
+                        currentOnLongPressDrag(lastRow)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            val targetRow = (rowIndex + floor(change.position.y / rowHeightPx).toInt()).coerceIn(0, rowCount - 1)
+                            if (targetRow != lastRow) {
+                                val step = if (targetRow > lastRow) 1 else -1
+                                var row = lastRow + step
+                                while (if (step > 0) row <= targetRow else row >= targetRow) {
+                                    currentOnLongPressDrag(row)
+                                    row += step
+                                }
+                                lastRow = targetRow
+                            }
+                            if (!change.pressed) break
+                            change.consume()
+                        }
+                    }
+                }
+            }
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
