@@ -397,14 +397,19 @@ class FloatingBubbleService : Service() {
                 val key = quickTextPreferenceKey(queue)
                 val lastId = preferences.getLong(key, -1L)
                 val lastIndex = items.indexOfFirst { it.id == lastId }
-                val target = if (replayPrevious && lastIndex >= 0) items[lastIndex]
-                    else items[(lastIndex + 1) % items.size]
+                val target = if (replayPrevious && lastIndex >= 0) {
+                    // Double tap moves one position backward in this queue.
+                    // The queue wraps from the first item to the last item.
+                    items[(lastIndex - 1 + items.size) % items.size]
+                } else {
+                    items[(lastIndex + 1) % items.size]
+                }
                 withContext(Dispatchers.Main) {
                     ClipboardTools.copyText(this@FloatingBubbleService, target.title, target.content)
                     preferences.edit().putLong(key, target.id).apply()
                     ClipboardTools.toast(
                         this@FloatingBubbleService,
-                        if (replayPrevious) "Repeated: " + target.title else "TXT" + queue + " copied: " + target.title
+                        if (replayPrevious) "Previous: " + target.title else "TXT" + queue + " copied: " + target.title
                     )
                 }
                 dao.setQuickTextLastCopied(queue, target.id)
