@@ -50,6 +50,7 @@ data class ClipboardSheetEntity(
     @ColumnInfo(defaultValue = "''") val colB: String = "",
     @ColumnInfo(defaultValue = "''") val colC: String = "",
     @ColumnInfo(defaultValue = "''") val colD: String = "",
+    @ColumnInfo(defaultValue = "''") val colE: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -172,7 +173,7 @@ interface FloatClipDao {
 
 @Database(
     entities = [QuickTextEntity::class, SavedClipboardEntity::class, ClipboardSheetEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class FloatClipDatabase : RoomDatabase() {
@@ -224,6 +225,12 @@ abstract class FloatClipDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE clipboard_sheet ADD COLUMN colE TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile
         private var instance: FloatClipDatabase? = null
 
@@ -234,7 +241,7 @@ abstract class FloatClipDatabase : RoomDatabase() {
                     FloatClipDatabase::class.java,
                     "floatclip.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
