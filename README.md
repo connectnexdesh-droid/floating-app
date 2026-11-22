@@ -8,7 +8,7 @@ FloatClip is an Android floating clipboard utility with two sequential Quick Tex
 - Quick Text has two independent queues: TXT1 and TXT2. Each supports its own saved rows and sequential copy position.
 - Tap TXT1 or TXT2 once to copy the next row. Tap the same button twice within one second to repeat the last copied row.
 - The Quick Text sheet marks the last copied row with a star. Hold a row number and slide up or down to select multiple rows; slide across a selected row to toggle it off.
-- Clipboard Sheet keeps five columns (A–E). The floating A/B/C/D/E buttons show the next target row (for example A1, B2, C3) and advance as entries are saved.
+- Clipboard Sheet keeps five columns (A–E). The floating A/B/C/D/E buttons show the next target row (for example A1, C3, or E5) and advance as entries are saved.
 - Quick Text and Clipboard Sheet support multi-row delete, Undo, and Redo. Cell edits, paste operations, and purge operations are also undoable.
 - Room database persists text locally.
 - RFC 6238 TOTP generation uses the secret currently on the clipboard; the secret is not saved by FloatClip.
