@@ -78,19 +78,19 @@ private data class SheetPalette(
 private val sheetPalettes = listOf(
     SheetPalette(
         rowHeader = Color(0xFFE91E63),
-        columns = listOf(Color(0xFF4CAF50), Color(0xFF2196F3), Color(0xFFFF9800), Color(0xFF9C27B0))
+        columns = listOf(Color(0xFF4CAF50), Color(0xFF2196F3), Color(0xFFFF9800), Color(0xFF9C27B0), Color(0xFF00897B))
     ),
     SheetPalette(
         rowHeader = Color(0xFF0F766E),
-        columns = listOf(Color(0xFF2563EB), Color(0xFF7C3AED), Color(0xFFEA580C), Color(0xFFDB2777))
+        columns = listOf(Color(0xFF2563EB), Color(0xFF7C3AED), Color(0xFFEA580C), Color(0xFFDB2777), Color(0xFF0891B2))
     ),
     SheetPalette(
         rowHeader = Color(0xFF475569),
-        columns = listOf(Color(0xFF0891B2), Color(0xFF65A30D), Color(0xFFD97706), Color(0xFF9333EA))
+        columns = listOf(Color(0xFF0891B2), Color(0xFF65A30D), Color(0xFFD97706), Color(0xFF9333EA), Color(0xFF0F766E))
     )
 )
 
-private val columnNames = listOf("COL A", "COL B", "COL C", "COL D")
+private val columnNames = listOf("COL A", "COL B", "COL C", "COL D", "COL E")
 
 private data class HistoryAction(val key: String, val label: String, val undo: suspend () -> Unit, val redo: suspend () -> Unit)
 class FloatClipHistory {
@@ -150,7 +150,7 @@ private data class SheetSelection(
 }
 
 private fun columnLetter(index: Int): String =
-    listOf("A", "B", "C", "D").getOrElse(index) { "?" }
+    listOf("A", "B", "C", "D", "E").getOrElse(index) { "?" }
 
 
 @Composable
@@ -161,11 +161,12 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
     val horizontalState = rememberScrollState()
     val editMutex = remember { Mutex() }
     var paletteIndex by remember { mutableStateOf(0) }
-    var selection by remember { mutableStateOf(SheetSelection()) }
-    var rangeSelectMode by remember { mutableStateOf(false) }
-    var rangeAnchor by remember { mutableStateOf<CellPosition?>(null) }
-    var showPurgeDialog by remember { mutableStateOf(false) }
-    val selectedRowIds = remember { mutableStateListOf<Long>() }
+    var selection by remember(queue) { mutableStateOf(SheetSelection()) }
+    var rangeSelectMode by remember(queue) { mutableStateOf(false) }
+    var rangeAnchor by remember(queue) { mutableStateOf<CellPosition?>(null) }
+    var showPurgeDialog by remember(queue) { mutableStateOf(false) }
+    var hasActiveCellSelection by remember(queue) { mutableStateOf(false) }
+    val selectedRowIds = remember(queue) { mutableStateListOf<Long>() }
     val listState = rememberLazyListState()
     val palette = sheetPalettes[paletteIndex]
     val rowCount = maxOf(16, items.size + 1)
@@ -173,6 +174,8 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
     val toggleSelectedRow: (Long) -> Unit = { id -> if (id > 0L) { if (selectedRowIds.contains(id)) selectedRowIds.remove(id) else selectedRowIds.add(id) } }
 
     val selectCell: (Int, Int) -> Unit = { row, column ->
+        selectedRowIds.clear()
+        hasActiveCellSelection = true
         if (rangeSelectMode) {
             val anchor = rangeAnchor
             if (anchor == null) {
@@ -192,6 +195,8 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
     }
     val selectColumn: (Int) -> Unit = { column ->
         focusManager.clearFocus()
+        selectedRowIds.clear()
+        hasActiveCellSelection = false
         selection = SheetSelection(wholeColumn = column)
         rangeAnchor = null
         rangeSelectMode = false
@@ -270,14 +275,28 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
                 }
             },
             onDeleteRows = {
-                val ids = selectedRowIds.toList()
-                if (ids.isEmpty()) ClipboardTools.toast(context, "Select one or more rows first.")
+                val ids = selectedRowIds.toList().ifEmpty {
+                    if (selection.wholeRow != null) {
+                        listOfNotNull(items.getOrNull(selection.wholeRow)?.id?.takeIf { it > 0L })
+                    } else if (hasActiveCellSelection && selection.wholeColumn == null && items.isNotEmpty()) {
+                        val firstRow = selection.topRow().coerceIn(0, items.lastIndex)
+                        val lastRow = selection.bottomRow(items.lastIndex).coerceIn(firstRow, items.lastIndex)
+                        (firstRow..lastRow).mapNotNull { items.getOrNull(it)?.id?.takeIf { id -> id > 0L } }
+                    } else {
+                        emptyList()
+                    }
+                }.distinct()
+                if (ids.isEmpty()) ClipboardTools.toast(context, "Select a row number or a cell/range first.")
                 else scope.launch {
                     val before = dao.getQuickTextsOnce(queue)
                     ids.forEach { dao.deleteQuickText(it) }
                     val after = dao.getQuickTextsOnce(queue)
                     history.record("quick-delete-" + queue, "Delete TXT" + queue + " rows", undo = { dao.restoreQuickTextQueue(queue, before) }, redo = { dao.restoreQuickTextQueue(queue, after) })
                     selectedRowIds.clear()
+                    hasActiveCellSelection = false
+                    selection = SheetSelection()
+                    rangeAnchor = null
+                    rangeSelectMode = false
                     ClipboardTools.toast(context, "Deleted " + ids.size + " row(s). Undo is available.")
                 }
             },
@@ -314,7 +333,7 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
             )
         }
 
-        Text("★ Last copied · Hold a row number and slide across rows to select; slide back over a selected row to deselect.", modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("★ Last copied · Tap a row number or select a cell/range, then use Del Row. Hold and slide to select multiple rows.", modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         PurgeAllButton(onClick = { showPurgeDialog = true })
         SpreadsheetHeader(
             horizontalState,
@@ -335,8 +354,8 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
                         color = palette.rowHeader,
                         selected = selection.wholeRow == index || rowSelected,
                         lastCopied = item.lastCopied,
-                        onClick = { if (item.id > 0L) toggleSelectedRow(item.id) },
-                        onLongPressDrag = { target -> rows.getOrNull(target)?.id?.let(toggleSelectedRow) }
+                        onClick = { if (item.id > 0L) { hasActiveCellSelection = false; toggleSelectedRow(item.id) } },
+                        onLongPressDrag = { target -> hasActiveCellSelection = false; rows.getOrNull(target)?.id?.let(toggleSelectedRow) }
                     )
                     Row(modifier = Modifier.horizontalScroll(horizontalState)) {
                         SpreadsheetCell(
@@ -408,6 +427,7 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
     var rangeSelectMode by remember { mutableStateOf(false) }
     var rangeAnchor by remember { mutableStateOf<CellPosition?>(null) }
     var showPurgeDialog by remember { mutableStateOf(false) }
+    var hasActiveCellSelection by remember { mutableStateOf(false) }
     val selectedRowIds = remember { mutableStateListOf<Long>() }
     val listState = rememberLazyListState()
     val toggleSelectedRow: (Long) -> Unit = { id -> if (id > 0L) { if (selectedRowIds.contains(id)) selectedRowIds.remove(id) else selectedRowIds.add(id) } }
@@ -418,6 +438,8 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
     }
 
     val selectCell: (Int, Int) -> Unit = { row, column ->
+        selectedRowIds.clear()
+        hasActiveCellSelection = true
         if (rangeSelectMode) {
             val anchor = rangeAnchor
             if (anchor == null) {
@@ -428,7 +450,7 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                 selection = SheetSelection(anchor.row, anchor.column, row, column)
                 rangeAnchor = null
                 rangeSelectMode = false
-                ClipboardTools.toast(context, "Selected range ${selection.label(4)}.")
+                ClipboardTools.toast(context, "Selected range ${selection.label(5)}.")
             }
         } else {
             selection = SheetSelection(row, column, row, column)
@@ -437,6 +459,8 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
     }
     val selectColumn: (Int) -> Unit = { column ->
         focusManager.clearFocus()
+        selectedRowIds.clear()
+        hasActiveCellSelection = false
         selection = SheetSelection(wholeColumn = column)
         rangeAnchor = null
         rangeSelectMode = false
@@ -465,19 +489,33 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
     Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
         SheetToolbar(
             palette = palette,
-            columnCount = 4,
-            selectedCellLabel = selection.label(4),
+            columnCount = 5,
+            selectedCellLabel = selection.label(5),
             rangeSelectMode = rangeSelectMode,
             onToggleRange = toggleRangeSelection,
             onDeleteRows = {
-                val ids = selectedRowIds.toList()
-                if (ids.isEmpty()) ClipboardTools.toast(context, "Select one or more rows first.")
+                val ids = selectedRowIds.toList().ifEmpty {
+                    if (selection.wholeRow != null) {
+                        listOfNotNull(items.getOrNull(selection.wholeRow)?.id?.takeIf { it > 0L })
+                    } else if (hasActiveCellSelection && selection.wholeColumn == null && items.isNotEmpty()) {
+                        val firstRow = selection.topRow().coerceIn(0, items.lastIndex)
+                        val lastRow = selection.bottomRow(items.lastIndex).coerceIn(firstRow, items.lastIndex)
+                        (firstRow..lastRow).mapNotNull { items.getOrNull(it)?.id?.takeIf { id -> id > 0L } }
+                    } else {
+                        emptyList()
+                    }
+                }.distinct()
+                if (ids.isEmpty()) ClipboardTools.toast(context, "Select a row number or a cell/range first.")
                 else scope.launch {
                     val before = dao.getClipboardSheetOnce()
                     ids.forEach { dao.deleteClipboardSheet(it) }
                     val after = dao.getClipboardSheetOnce()
                     history.record("clipboard-delete", "Delete clipboard rows", undo = { dao.restoreClipboardSheet(before) }, redo = { dao.restoreClipboardSheet(after) })
                     selectedRowIds.clear()
+                    hasActiveCellSelection = false
+                    selection = SheetSelection()
+                    rangeAnchor = null
+                    rangeSelectMode = false
                     ClipboardTools.toast(context, "Deleted " + ids.size + " row(s). Undo is available.")
                 }
             },
@@ -489,7 +527,7 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                 val firstRow = selection.topRow()
                 val lastRow = selection.bottomRow(items.lastIndex.coerceAtLeast(0))
                 val firstColumn = selection.leftColumn()
-                val lastColumn = selection.rightColumn(4)
+                val lastColumn = selection.rightColumn(5)
                 val values = if (items.isEmpty()) emptyList() else (firstRow..lastRow).map { row ->
                     (firstColumn..lastColumn).map { column ->
                         items.getOrNull(row)?.let { clipboardCell(it, column) }.orEmpty()
@@ -503,7 +541,7 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                         "FloatClip selection",
                         values.joinToString("\n") { row -> row.joinToString("\t") }
                     )
-                    ClipboardTools.toast(context, "Copied selection ${selection.label(4)}.")
+                    ClipboardTools.toast(context, "Copied selection ${selection.label(5)}.")
                 }
             },
             onPaste = {
@@ -517,11 +555,11 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                     val singleClipboardCell = grid.size == 1 && grid.firstOrNull()?.size == 1
                     val fillSelectedRange = singleClipboardCell &&
                         selection.wholeColumn == null &&
-                        selection.rowSpan() * selection.columnSpan(4) > 1
+                        selection.rowSpan() * selection.columnSpan(5) > 1
                     val destinationEndRow = if (fillSelectedRange) selection.bottomRow(rowCount - 1)
                         else startRow + grid.lastIndex.coerceAtLeast(0)
-                    val destinationEndColumn = if (fillSelectedRange) selection.rightColumn(4)
-                        else minOf(3, startColumn + (grid.maxOfOrNull { it.size } ?: 1) - 1)
+                    val destinationEndColumn = if (fillSelectedRange) selection.rightColumn(5)
+                        else minOf(4, startColumn + (grid.maxOfOrNull { it.size } ?: 1) - 1)
                     focusManager.clearFocus()
                     scope.launch {
                         val before = dao.getClipboardSheetOnce()
@@ -532,7 +570,7 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                             } else grid.forEachIndexed { rowOffset, values ->
                                 values.forEachIndexed { columnOffset, value ->
                                     val destinationColumn = startColumn + columnOffset
-                                    if (destinationColumn in 0..3) updateClipboardCell(dao, startRow + rowOffset, destinationColumn, value)
+                                    if (destinationColumn in 0..4) updateClipboardCell(dao, startRow + rowOffset, destinationColumn, value)
                                 }
                             }
                         }
@@ -549,9 +587,9 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                         val pastedCellCount = if (fillSelectedRange) {
                             (destinationEndRow - startRow + 1) * (destinationEndColumn - startColumn + 1)
                         } else {
-                            grid.sumOf { values -> values.indices.count { startColumn + it in 0..3 } }
+                            grid.sumOf { values -> values.indices.count { startColumn + it in 0..4 } }
                         }
-                        val suffix = if (grid.any { it.size + startColumn > 4 }) " Extra cells beyond COL D were skipped." else ""
+                        val suffix = if (grid.any { it.size + startColumn > 5 }) " Extra cells beyond COL E were skipped." else ""
                         ClipboardTools.toast(
                             context,
                             "Pasted $pastedCellCount cell(s) starting at ${columnLetter(startColumn)}${startRow + 1}.$suffix"
@@ -577,8 +615,8 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                     columnNames,
                     items.filter {
                         it.colA.isNotBlank() || it.colB.isNotBlank() ||
-                            it.colC.isNotBlank() || it.colD.isNotBlank()
-                    }.map { listOf(it.colA, it.colB, it.colC, it.colD) }
+                            it.colC.isNotBlank() || it.colD.isNotBlank() || it.colE.isNotBlank()
+                    }.map { listOf(it.colA, it.colB, it.colC, it.colD, it.colE) }
                 )
                 if (csv.isBlank()) ClipboardTools.toast(context, "No records to export.")
                 else exportCsv(context, "ClipboardSheet", csv)
@@ -595,12 +633,12 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
             )
         }
 
-        Text("Hold a row number and slide across rows to select multiple rows; slide back over a selected row to deselect.", modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Tap a row number or select a cell/range, then use Del Row. Hold and slide to select multiple rows.", modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         PurgeAllButton(onClick = { showPurgeDialog = true })
         SpreadsheetHeader(
             horizontalState,
             palette,
-            columnCount = 4,
+            columnCount = 5,
             selectedColumn = selection.wholeColumn,
             onSelectColumn = selectColumn
         )
@@ -615,11 +653,11 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                         rowCount = rows.size,
                         color = palette.rowHeader,
                         selected = selection.wholeRow == index || rowSelected,
-                        onClick = { if (item.id > 0L) toggleSelectedRow(item.id) },
-                        onLongPressDrag = { target -> rows.getOrNull(target)?.id?.let(toggleSelectedRow) }
+                        onClick = { if (item.id > 0L) { hasActiveCellSelection = false; toggleSelectedRow(item.id) } },
+                        onLongPressDrag = { target -> hasActiveCellSelection = false; rows.getOrNull(target)?.id?.let(toggleSelectedRow) }
                     )
                     Row(modifier = Modifier.horizontalScroll(horizontalState)) {
-                        for (column in 0..3) {
+                        for (column in 0..4) {
                             SpreadsheetCell(
                                 rowIndex = index,
                                 columnIndex = column,
@@ -971,7 +1009,8 @@ private fun clipboardCell(item: ClipboardSheetEntity, column: Int): String = whe
     0 -> item.colA
     1 -> item.colB
     2 -> item.colC
-    else -> item.colD
+    3 -> item.colD
+    else -> item.colE
 }
 
 private suspend fun updateClipboardCell(
@@ -991,7 +1030,8 @@ private suspend fun updateClipboardCell(
         0 -> row.copy(colA = value)
         1 -> row.copy(colB = value)
         2 -> row.copy(colC = value)
-        else -> row.copy(colD = value)
+        3 -> row.copy(colD = value)
+        else -> row.copy(colE = value)
     }
     dao.updateClipboardSheet(updated)
 }
