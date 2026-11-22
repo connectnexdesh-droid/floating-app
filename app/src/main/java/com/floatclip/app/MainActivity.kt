@@ -207,6 +207,8 @@ private fun BubbleSettingsScreen() {
     var showAButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_a", true)) }
     var showBButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_b", true)) }
     var showCButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_c", true)) }
+    var showDButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_d", true)) }
+    var showEButton by remember { mutableStateOf(preferences.getBoolean("show_bubble_button_e", true)) }
     var showTxt1Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt1", true)) }
     var showTxt2Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt2", true)) }
     var showTxt3Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt3", true)) }
@@ -362,6 +364,28 @@ private fun BubbleSettingsScreen() {
             }
             Switch(checked = showCButton, onCheckedChange = { showCButton = it })
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("D button", fontWeight = FontWeight.SemiBold)
+                Text("Save clipboard text to Column D", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = showDButton, onCheckedChange = { showDButton = it })
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("E button", fontWeight = FontWeight.SemiBold)
+                Text("Save clipboard text to Column E", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = showEButton, onCheckedChange = { showEButton = it })
+        }
 
         Button(
             onClick = {
@@ -371,6 +395,8 @@ private fun BubbleSettingsScreen() {
                     .putBoolean("show_bubble_button_a", showAButton)
                     .putBoolean("show_bubble_button_b", showBButton)
                     .putBoolean("show_bubble_button_c", showCButton)
+                    .putBoolean("show_bubble_button_d", showDButton)
+                    .putBoolean("show_bubble_button_e", showEButton)
                     .putBoolean("show_bubble_txt1", showTxt1Button)
                     .putBoolean("show_bubble_txt2", showTxt2Button)
                     .putBoolean("show_bubble_txt3", showTxt3Button)
