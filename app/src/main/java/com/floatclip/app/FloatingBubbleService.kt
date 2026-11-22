@@ -21,8 +21,10 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.floatclip.app.data.ClipboardSheetEntity
@@ -167,7 +169,41 @@ class FloatingBubbleService : Service() {
                 topMargin = dp(6)
             }
         )
-        root.addView(panel)
+        val panelScroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                // Keep the expanded action list scrollable instead of letting A–E
+                // buttons extend beyond the bottom of the screen.
+                val availableHeight = (
+                    resources.displayMetrics.heightPixels -
+                        windowParams.y -
+                        dp(initialBubbleSize) -
+                        dp(24)
+                    ).coerceAtLeast(dp(120))
+                val limitedHeightSpec = MeasureSpec.makeMeasureSpec(
+                    availableHeight,
+                    MeasureSpec.AT_MOST
+                )
+                super.onMeasure(widthMeasureSpec, limitedHeightSpec)
+            }
+        }.apply {
+            isFillViewport = false
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(
+                panel,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        root.addView(
+            panelScroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
 
         windowParams = WindowManager.LayoutParams(
             dp(initialBubbleSize + ROOT_HORIZONTAL_PADDING_DP),
