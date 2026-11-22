@@ -276,8 +276,9 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
             },
             onDeleteRows = {
                 val ids = selectedRowIds.toList().ifEmpty {
-                    if (selection.wholeRow != null) {
-                        listOfNotNull(items.getOrNull(selection.wholeRow)?.id?.takeIf { it > 0L })
+                    val selectedWholeRow = selection.wholeRow
+                    if (selectedWholeRow != null) {
+                        listOfNotNull(items.getOrNull(selectedWholeRow)?.id?.takeIf { it > 0L })
                     } else if (hasActiveCellSelection && selection.wholeColumn == null && items.isNotEmpty()) {
                         val firstRow = selection.topRow().coerceIn(0, items.lastIndex)
                         val lastRow = selection.bottomRow(items.lastIndex).coerceIn(firstRow, items.lastIndex)
@@ -495,8 +496,9 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
             onToggleRange = toggleRangeSelection,
             onDeleteRows = {
                 val ids = selectedRowIds.toList().ifEmpty {
-                    if (selection.wholeRow != null) {
-                        listOfNotNull(items.getOrNull(selection.wholeRow)?.id?.takeIf { it > 0L })
+                    val selectedWholeRow = selection.wholeRow
+                    if (selectedWholeRow != null) {
+                        listOfNotNull(items.getOrNull(selectedWholeRow)?.id?.takeIf { it > 0L })
                     } else if (hasActiveCellSelection && selection.wholeColumn == null && items.isNotEmpty()) {
                         val firstRow = selection.topRow().coerceIn(0, items.lastIndex)
                         val lastRow = selection.bottomRow(items.lastIndex).coerceIn(firstRow, items.lastIndex)
