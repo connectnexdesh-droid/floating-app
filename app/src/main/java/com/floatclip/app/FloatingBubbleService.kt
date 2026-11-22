@@ -21,8 +21,10 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.floatclip.app.data.ClipboardSheetEntity
@@ -167,7 +169,41 @@ class FloatingBubbleService : Service() {
                 topMargin = dp(6)
             }
         )
-        root.addView(panel)
+        val panelScroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                // Keep the expanded action list scrollable instead of letting A–E
+                // buttons extend beyond the bottom of the screen.
+                val availableHeight = (
+                    resources.displayMetrics.heightPixels -
+                        windowParams.y -
+                        dp(initialBubbleSize) -
+                        dp(24)
+                    ).coerceAtLeast(dp(120))
+                val limitedHeightSpec = MeasureSpec.makeMeasureSpec(
+                    availableHeight,
+                    MeasureSpec.AT_MOST
+                )
+                super.onMeasure(widthMeasureSpec, limitedHeightSpec)
+            }
+        }.apply {
+            isFillViewport = false
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(
+                panel,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        root.addView(
+            panelScroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
 
         windowParams = WindowManager.LayoutParams(
             dp(initialBubbleSize + ROOT_HORIZONTAL_PADDING_DP),
@@ -340,6 +376,12 @@ class FloatingBubbleService : Service() {
         if (preferences.getBoolean(KEY_SHOW_BUTTON_C, true)) {
             buttons.add(actionButton("C1", "#EC4899") { saveClipboardTo("C") })
         }
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_D, true)) {
+            buttons.add(actionButton("D1", "#EC4899") { saveClipboardTo("D") })
+        }
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_E, true)) {
+            buttons.add(actionButton("E1", "#EC4899") { saveClipboardTo("E") })
+        }
         buttons.add(actionButton("💔", "#F87171") { stopSelf() })
         return buttons
     }
@@ -367,6 +409,8 @@ class FloatingBubbleService : Service() {
                 label.startsWith("A") -> "Save clipboard text to Column A"
                 label.startsWith("B") -> "Save clipboard text to Column B"
                 label.startsWith("C") -> "Save clipboard text to Column C"
+                label.startsWith("D") -> "Save clipboard text to Column D"
+                label.startsWith("E") -> "Save clipboard text to Column E"
                 else -> "Close FloatClip bubble"
             }
             setOnClickListener { action() }
@@ -435,13 +479,17 @@ class FloatingBubbleService : Service() {
                         "Save clipboard text to Column A" -> "A"
                         "Save clipboard text to Column B" -> "B"
                         "Save clipboard text to Column C" -> "C"
+                        "Save clipboard text to Column D" -> "D"
+                        "Save clipboard text to Column E" -> "E"
                         else -> null
                     } ?: return@forEach
                     val firstEmpty = rows.indexOfFirst { row ->
                         when (slot) {
                             "A" -> row.colA.isBlank()
                             "B" -> row.colB.isBlank()
-                            else -> row.colC.isBlank()
+                            "C" -> row.colC.isBlank()
+                            "D" -> row.colD.isBlank()
+                            else -> row.colE.isBlank()
                         }
                     }
                     val nextLabel = slot + (if (firstEmpty >= 0) firstEmpty + 1 else rows.size + 1)
@@ -518,14 +566,18 @@ class FloatingBubbleService : Service() {
                             when (slot) {
                                 "A" -> row.colA.isBlank()
                                 "B" -> row.colB.isBlank()
-                                else -> row.colC.isBlank()
+                                "C" -> row.colC.isBlank()
+                                "D" -> row.colD.isBlank()
+                                else -> row.colE.isBlank()
                             }
                         }
                         if (target != null) {
                             val updated = when (slot) {
                                 "A" -> target.copy(colA = content)
                                 "B" -> target.copy(colB = content)
-                                else -> target.copy(colC = content)
+                                "C" -> target.copy(colC = content)
+                                "D" -> target.copy(colD = content)
+                                else -> target.copy(colE = content)
                             }
                             dao.updateClipboardSheet(updated)
                         } else {
@@ -533,7 +585,9 @@ class FloatingBubbleService : Service() {
                             val row = when (slot) {
                                 "A" -> ClipboardSheetEntity(position = position, colA = content)
                                 "B" -> ClipboardSheetEntity(position = position, colB = content)
-                                else -> ClipboardSheetEntity(position = position, colC = content)
+                                "C" -> ClipboardSheetEntity(position = position, colC = content)
+                                "D" -> ClipboardSheetEntity(position = position, colD = content)
+                                else -> ClipboardSheetEntity(position = position, colE = content)
                             }
                             dao.insertClipboardSheet(row)
                         }
@@ -626,6 +680,8 @@ class FloatingBubbleService : Service() {
         private const val KEY_SHOW_BUTTON_A = "show_bubble_button_a"
         private const val KEY_SHOW_BUTTON_B = "show_bubble_button_b"
         private const val KEY_SHOW_BUTTON_C = "show_bubble_button_c"
+        private const val KEY_SHOW_BUTTON_D = "show_bubble_button_d"
+        private const val KEY_SHOW_BUTTON_E = "show_bubble_button_e"
         private const val KEY_SHOW_TXT1_BUTTON = "show_bubble_txt1"
         private const val KEY_SHOW_TXT2_BUTTON = "show_bubble_txt2"
         private const val KEY_SHOW_TXT3_BUTTON = "show_bubble_txt3"
