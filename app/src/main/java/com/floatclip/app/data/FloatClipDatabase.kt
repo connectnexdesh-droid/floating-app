@@ -59,7 +59,7 @@ data class ClipboardSheetEntity(
 
 @Entity(
     tableName = "balance_transactions",
-    indices = [Index(value = ["rowId", "type"], unique = true)]
+    indices = [Index(value = ["rowId", "createdAt"])]
 )
 data class BalanceTransactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -186,9 +186,6 @@ interface FloatClipDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertBalanceTransaction(item: BalanceTransactionEntity): Long
 
-    @Query("DELETE FROM balance_transactions WHERE rowId = :rowId AND type = 'REVERSAL'")
-    suspend fun deleteBalanceReversal(rowId: Long)
-
     @Query("SELECT * FROM balance_transactions ORDER BY createdAt DESC, id DESC")
     fun observeBalanceTransactions(): Flow<List<BalanceTransactionEntity>>
 
@@ -201,11 +198,8 @@ interface FloatClipDao {
         requiredColumns: List<String>,
         rewardAmountPaisa: Long
     ): Long {
-        if (requiredColumns.isEmpty() || rewardAmountPaisa <= 0L) return 0L
         val row = getClipboardSheetById(rowId) ?: return 0L
-        if (row.rewardAmountPaisa > 0L) return 0L
-
-        val complete = requiredColumns.all { column ->
+        val complete = requiredColumns.isNotEmpty() && requiredColumns.all { column ->
             when (column) {
                 "A" -> row.colA.isNotBlank()
                 "B" -> row.colB.isNotBlank()
@@ -215,20 +209,37 @@ interface FloatClipDao {
                 else -> false
             }
         }
-        if (!complete) return 0L
 
-        val now = System.currentTimeMillis()
-        updateClipboardSheet(row.copy(rewardAmountPaisa = rewardAmountPaisa, rewardedAt = now))
-        insertBalanceTransaction(
-            BalanceTransactionEntity(
-                rowId = row.id,
-                rowNumber = row.position + 1,
-                amountPaisa = rewardAmountPaisa,
-                type = "EARN",
-                createdAt = now
+        if (complete && row.rewardAmountPaisa == 0L && rewardAmountPaisa > 0L) {
+            val now = System.currentTimeMillis()
+            updateClipboardSheet(row.copy(rewardAmountPaisa = rewardAmountPaisa, rewardedAt = now))
+            insertBalanceTransaction(
+                BalanceTransactionEntity(
+                    rowId = row.id,
+                    rowNumber = row.position + 1,
+                    amountPaisa = rewardAmountPaisa,
+                    type = "EARN",
+                    createdAt = now
+                )
             )
-        )
-        return rewardAmountPaisa
+            return rewardAmountPaisa
+        }
+
+        if (!complete && row.rewardAmountPaisa > 0L) {
+            val now = System.currentTimeMillis()
+            updateClipboardSheet(row.copy(rewardAmountPaisa = 0L, rewardedAt = null))
+            insertBalanceTransaction(
+                BalanceTransactionEntity(
+                    rowId = row.id,
+                    rowNumber = row.position + 1,
+                    amountPaisa = -row.rewardAmountPaisa,
+                    type = "REVERSAL",
+                    createdAt = now
+                )
+            )
+            return -row.rewardAmountPaisa
+        }
+        return 0L
     }
 
     @Transaction
@@ -250,20 +261,43 @@ interface FloatClipDao {
     @Transaction
     suspend fun restoreClipboardSheet(items: List<ClipboardSheetEntity>) {
         val existing = getClipboardSheetOnce()
-        val targetIds = items.map { it.id }.toSet()
+        val existingById = existing.associateBy { it.id }
+        val targetById = items.associateBy { it.id }
 
-        existing.filter { it.rewardAmountPaisa > 0L && it.id !in targetIds }.forEach { row ->
+        existing.forEach { oldRow ->
+            val targetRow = targetById[oldRow.id]
+            val oldReward = oldRow.rewardAmountPaisa
+            val targetReward = targetRow?.rewardAmountPaisa ?: 0L
+            if (oldReward > 0L && targetReward != oldReward) {
+                insertBalanceTransaction(
+                    BalanceTransactionEntity(
+                        rowId = oldRow.id,
+                        rowNumber = oldRow.position + 1,
+                        amountPaisa = -oldReward,
+                        type = "REVERSAL"
+                    )
+                )
+            }
+            if (targetReward > 0L && targetReward != oldReward) {
+                insertBalanceTransaction(
+                    BalanceTransactionEntity(
+                        rowId = oldRow.id,
+                        rowNumber = targetRow?.position?.plus(1) ?: oldRow.position + 1,
+                        amountPaisa = targetReward,
+                        type = "RESTORE"
+                    )
+                )
+            }
+        }
+        items.filter { it.id !in existingById && it.rewardAmountPaisa > 0L }.forEach { row ->
             insertBalanceTransaction(
                 BalanceTransactionEntity(
                     rowId = row.id,
                     rowNumber = row.position + 1,
-                    amountPaisa = -row.rewardAmountPaisa,
-                    type = "REVERSAL"
+                    amountPaisa = row.rewardAmountPaisa,
+                    type = "RESTORE"
                 )
             )
-        }
-        items.filter { it.rewardAmountPaisa > 0L }.forEach { row ->
-            deleteBalanceReversal(row.id)
         }
 
         deleteAllClipboardSheet()
@@ -352,8 +386,8 @@ abstract class FloatClipDatabase : RoomDatabase() {
                         "createdAt INTEGER NOT NULL)"
                 )
                 database.execSQL(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS index_balance_transactions_rowId_type " +
-                        "ON balance_transactions (rowId, type)"
+                    "CREATE INDEX IF NOT EXISTS index_balance_transactions_rowId_createdAt " +
+                        "ON balance_transactions (rowId, createdAt)"
                 )
             }
         }
