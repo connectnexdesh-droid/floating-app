@@ -34,10 +34,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 class FloatingBubbleService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -81,6 +83,7 @@ class FloatingBubbleService : Service() {
             return
         }
         addBubbleView()
+        observeBalance()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -154,8 +157,8 @@ class FloatingBubbleService : Service() {
         actionButtons.forEach(panel::addView)
 
         val bubble = TextView(this).apply {
-            text = "FC"
-            textSize = (initialBubbleSize * 0.27f).coerceIn(12f, 22f)
+            text = "৳0"
+            textSize = (initialBubbleSize * 0.24f).coerceIn(10f, 17f)
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             background = bubbleBackground()
@@ -315,7 +318,7 @@ class FloatingBubbleService : Service() {
         val size = bubbleSizeDp()
         val bubble = bubbleView
         if (bubble != null) {
-            bubble.textSize = (size * 0.27f).coerceIn(12f, 22f)
+            bubble.textSize = balanceBubbleTextSize(size, bubble.text.length)
             bubble.background = glassButtonBackground()
             val bubbleLayout = bubble.layoutParams as? LinearLayout.LayoutParams
                 ?: LinearLayout.LayoutParams(dp(size), dp(size))
@@ -556,12 +559,13 @@ class FloatingBubbleService : Service() {
             }
 
             try {
-                withContext(Dispatchers.IO) {
+                val activeColumns = activeRewardColumns()
+                val rewardAmountPaisa = preferences.getLong(KEY_REWARD_PER_ROW_PAISA, 0L).coerceAtLeast(0L)
+                val reward = withContext(Dispatchers.IO) {
                     clipboardSaveMutex.withLock {
                         val dao = database.dao()
                         val rows = dao.getClipboardSheetOnce()
-                        // Each column fills its own first empty cell. For example, saving
-                        // to C after A1 is filled should populate C1, not force C2.
+                        // Each column fills its own first empty cell, keeping A–E aligned by row.
                         val target = rows.firstOrNull { row ->
                             when (slot) {
                                 "A" -> row.colA.isBlank()
@@ -571,7 +575,7 @@ class FloatingBubbleService : Service() {
                                 else -> row.colE.isBlank()
                             }
                         }
-                        if (target != null) {
+                        val savedRowId = if (target != null) {
                             val updated = when (slot) {
                                 "A" -> target.copy(colA = content)
                                 "B" -> target.copy(colB = content)
@@ -580,6 +584,7 @@ class FloatingBubbleService : Service() {
                                 else -> target.copy(colE = content)
                             }
                             dao.updateClipboardSheet(updated)
+                            target.id
                         } else {
                             val position = (dao.maxClipboardSheetPosition() ?: -1) + 1
                             val row = when (slot) {
@@ -591,12 +596,17 @@ class FloatingBubbleService : Service() {
                             }
                             dao.insertClipboardSheet(row)
                         }
+                        dao.rewardClipboardRowIfComplete(savedRowId, activeColumns, rewardAmountPaisa)
                     }
                 }
                 updateClipboardButtonLabels()
                 ClipboardTools.toast(
                     this@FloatingBubbleService,
-                    "Saved to Clipboard Sheet, column $slot."
+                    if (reward > 0L) {
+                        "Row completed! +${formatTaka(reward)} added to balance."
+                    } else {
+                        "Saved to Clipboard Sheet, column $slot."
+                    }
                 )
             } catch (exception: Exception) {
                 ClipboardTools.toast(
@@ -606,6 +616,51 @@ class FloatingBubbleService : Service() {
             }
         }
     }
+
+    private fun activeRewardColumns(): List<String> = buildList {
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_A, true)) add("A")
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_B, true)) add("B")
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_C, true)) add("C")
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_D, true)) add("D")
+        if (preferences.getBoolean(KEY_SHOW_BUTTON_E, true)) add("E")
+    }
+
+    private fun observeBalance() {
+        serviceScope.launch {
+            database.dao().observeTotalBalancePaisa().collect { amountPaisa ->
+                withContext(Dispatchers.Main.immediate) {
+                    val bubble = bubbleView ?: return@withContext
+                    val label = formatBubbleBalance(amountPaisa)
+                    bubble.text = label
+                    bubble.textSize = balanceBubbleTextSize(bubbleSizeDp(), label.length)
+                    bubble.contentDescription = "FloatClip balance ${formatTaka(amountPaisa)}"
+                }
+            }
+        }
+    }
+
+    private fun balanceBubbleTextSize(size: Int, labelLength: Int): Float =
+        (size * when {
+            labelLength >= 8 -> 0.145f
+            labelLength >= 6 -> 0.17f
+            labelLength >= 4 -> 0.20f
+            else -> 0.24f
+        }).coerceIn(9f, 17f)
+
+    private fun formatBubbleBalance(amountPaisa: Long): String {
+        val amount = amountPaisa / 100.0
+        val value = when {
+            amount >= 1_000_000 -> String.format(Locale.US, "%.1fM", amount / 1_000_000.0)
+            amount >= 10_000 -> String.format(Locale.US, "%.0fK", amount / 1_000.0)
+            amount >= 1_000 -> String.format(Locale.US, "%.1fK", amount / 1_000.0)
+            amountPaisa % 100L == 0L -> (amountPaisa / 100L).toString()
+            else -> String.format(Locale.US, "%.2f", amount)
+        }
+        return "৳" + value
+    }
+
+    private fun formatTaka(amountPaisa: Long): String =
+        "৳" + String.format(Locale.US, "%,.2f", amountPaisa / 100.0)
 
     private fun generateAndCopyTotp() {
         serviceScope.launch(Dispatchers.Main.immediate) {
@@ -685,6 +740,7 @@ class FloatingBubbleService : Service() {
         private const val KEY_SHOW_TXT1_BUTTON = "show_bubble_txt1"
         private const val KEY_SHOW_TXT2_BUTTON = "show_bubble_txt2"
         private const val KEY_SHOW_TXT3_BUTTON = "show_bubble_txt3"
+        private const val KEY_REWARD_PER_ROW_PAISA = "reward_per_completed_row_paisa"
         private const val DEFAULT_BUBBLE_SIZE_DP = 58
         private const val DEFAULT_BUBBLE_OPACITY_PERCENT = 75
         private const val ROOT_HORIZONTAL_PADDING_DP = 8
