@@ -687,7 +687,7 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                                             else updateClipboardCell(dao, index, column, previous, requiredRewardColumns, rewardAmountPaisa)
                                         },
                                         redo = { updateClipboardCell(dao, index, column, value, requiredRewardColumns, rewardAmountPaisa) })
-                                    scope.launch { editMutex.withLock { updateClipboardCell(dao, index, column, value) } }
+                                    scope.launch { editMutex.withLock { updateClipboardCell(dao, index, column, value, requiredRewardColumns, rewardAmountPaisa) } }
                                 }
                             )
                         }
