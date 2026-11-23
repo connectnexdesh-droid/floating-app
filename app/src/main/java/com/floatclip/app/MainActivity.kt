@@ -43,6 +43,8 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,8 +66,10 @@ import com.floatclip.app.data.FloatClipDao
 import com.floatclip.app.data.FloatClipDatabase
 import com.floatclip.app.data.QuickTextEntity
 import com.floatclip.app.data.SavedClipboardEntity
+import java.math.RoundingMode
 import java.text.DateFormat
 import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -189,7 +193,7 @@ private fun FloatClipScreen(database: FloatClipDatabase) {
                 }
                 1 -> ClipboardSheetSpreadsheet(clipboardItems, dao, history)
                 2 -> TwoFactorSheet()
-                else -> BubbleSettingsScreen()
+                else -> BubbleSettingsScreen(dao)
             }
         }
     }
@@ -197,7 +201,7 @@ private fun FloatClipScreen(database: FloatClipDatabase) {
 
 
 @Composable
-private fun BubbleSettingsScreen() {
+private fun BubbleSettingsScreen(dao: FloatClipDao) {
     val context = LocalContext.current
     val preferences = remember {
         context.getSharedPreferences("floatclip_bubble", android.content.Context.MODE_PRIVATE)
@@ -212,6 +216,21 @@ private fun BubbleSettingsScreen() {
     var showTxt1Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt1", true)) }
     var showTxt2Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt2", true)) }
     var showTxt3Button by remember { mutableStateOf(preferences.getBoolean("show_bubble_txt3", true)) }
+    var rewardAmountInput by remember {
+        mutableStateOf(
+            preferences.getLong("reward_per_completed_row_paisa", 0L)
+                .let { String.format(Locale.US, "%.2f", it / 100.0) }
+        )
+    }
+    val balancePaisa by dao.observeTotalBalancePaisa().collectAsState(initial = 0L)
+    val balanceTransactions by dao.observeBalanceTransactions().collectAsState(initial = emptyList())
+    val clipboardRows by dao.observeClipboardSheet().collectAsState(initial = emptyList())
+    val completedRows = clipboardRows.count { it.rewardAmountPaisa > 0L }
+    val pendingRows = clipboardRows.count {
+        it.rewardAmountPaisa == 0L &&
+            (it.colA.isNotBlank() || it.colB.isNotBlank() || it.colC.isNotBlank() ||
+                it.colD.isNotBlank() || it.colE.isNotBlank())
+    }
     val previewColor = Color(0xFF2563EB).copy(alpha = bubbleOpacity / 100f)
 
     Column(
@@ -247,14 +266,101 @@ private fun BubbleSettingsScreen() {
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "FC",
+                            formatTakaBalance(balancePaisa, compact = true),
                             color = Color.White,
-                            fontSize = (bubbleSize * 0.27f).sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = (bubbleSize * if (balancePaisa >= 100_000L) 0.15f else 0.20f).sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
                         )
                     }
                 }
                 Text("Preview", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4))
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Balance Overview", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    formatTakaBalance(balancePaisa),
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF15803D)
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Completed rows", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(completedRows.toString(), fontWeight = FontWeight.SemiBold)
+                    }
+                    Column {
+                        Text("Pending rows", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(pendingRows.toString(), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                OutlinedTextField(
+                    value = rewardAmountInput,
+                    onValueChange = { input ->
+                        if (input.all { it.isDigit() || it == '.' || it == ',' }) {
+                            rewardAmountInput = input
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Reward per completed row") },
+                    prefix = { Text("৳") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    supportingText = { Text("Set the amount added when all enabled A–E columns in a row are filled.") }
+                )
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Balance History", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                if (balanceTransactions.isEmpty()) {
+                    Text("No completed rows yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    balanceTransactions.take(20).forEach { transaction ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (transaction.type == "REVERSAL") "Row ${transaction.rowNumber} reversed" else "Row ${transaction.rowNumber} completed",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(transaction.createdAt)),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                (if (transaction.amountPaisa >= 0L) "+" else "−") +
+                                    formatTakaBalance(kotlin.math.abs(transaction.amountPaisa)),
+                                color = if (transaction.amountPaisa >= 0L) Color(0xFF15803D) else MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -389,7 +495,17 @@ private fun BubbleSettingsScreen() {
 
         Button(
             onClick = {
+                val rewardAmountPaisa = if (rewardAmountInput.isBlank()) {
+                    0L
+                } else {
+                    parseTakaToPaisa(rewardAmountInput)
+                }
+                if (rewardAmountPaisa == null || rewardAmountPaisa < 0L) {
+                    ClipboardTools.toast(context, "Enter a valid non-negative reward amount in taka.")
+                    return@Button
+                }
                 preferences.edit()
+                    .putLong("reward_per_completed_row_paisa", rewardAmountPaisa)
                     .putInt("bubble_size_dp", bubbleSize.toInt())
                     .putInt("bubble_opacity_percent", bubbleOpacity.toInt())
                     .putBoolean("show_bubble_button_a", showAButton)
@@ -405,7 +521,7 @@ private fun BubbleSettingsScreen() {
                     Intent(FloatingBubbleService.ACTION_APPLY_SETTINGS)
                         .setPackage(context.packageName)
                 )
-                ClipboardTools.toast(context, "Bubble appearance settings saved.")
+                ClipboardTools.toast(context, "Bubble and row reward settings saved.")
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -418,6 +534,30 @@ private fun BubbleSettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+
+private fun parseTakaToPaisa(input: String): Long? {
+    return try {
+        input.trim().replace(",", "")
+            .toBigDecimal()
+            .movePointRight(2)
+            .setScale(0, RoundingMode.HALF_UP)
+            .longValueExact()
+            .takeIf { it >= 0L }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun formatTakaBalance(amountPaisa: Long, compact: Boolean = false): String {
+    val amount = amountPaisa / 100.0
+    val value = if (compact && amount >= 100_000.0) {
+        String.format(Locale.US, "%.1fK", amount / 1_000.0)
+    } else {
+        String.format(Locale.US, "%,.2f", amount)
+    }
+    return "৳" + value
 }
 
 @Composable
