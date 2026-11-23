@@ -423,6 +423,17 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
     val scope = rememberCoroutineScope()
     val horizontalState = rememberScrollState()
     val editMutex = remember { Mutex() }
+    val rewardPreferences = remember(context) {
+        context.getSharedPreferences("floatclip_bubble", Context.MODE_PRIVATE)
+    }
+    val requiredRewardColumns = buildList {
+        if (rewardPreferences.getBoolean("show_bubble_button_a", true)) add("A")
+        if (rewardPreferences.getBoolean("show_bubble_button_b", true)) add("B")
+        if (rewardPreferences.getBoolean("show_bubble_button_c", true)) add("C")
+        if (rewardPreferences.getBoolean("show_bubble_button_d", true)) add("D")
+        if (rewardPreferences.getBoolean("show_bubble_button_e", true)) add("E")
+    }
+    val rewardAmountPaisa = rewardPreferences.getLong("reward_per_completed_row_paisa", 0L).coerceAtLeast(0L)
     var paletteIndex by remember { mutableStateOf(0) }
     var selection by remember { mutableStateOf(SheetSelection()) }
     var rangeSelectMode by remember { mutableStateOf(false) }
@@ -568,11 +579,11 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                         editMutex.withLock {
                             if (fillSelectedRange) {
                                 val value = grid.first().firstOrNull().orEmpty()
-                                for (row in startRow..destinationEndRow) for (column in startColumn..destinationEndColumn) updateClipboardCell(dao, row, column, value)
+                                for (row in startRow..destinationEndRow) for (column in startColumn..destinationEndColumn) updateClipboardCell(dao, row, column, value, requiredRewardColumns, rewardAmountPaisa)
                             } else grid.forEachIndexed { rowOffset, values ->
                                 values.forEachIndexed { columnOffset, value ->
                                     val destinationColumn = startColumn + columnOffset
-                                    if (destinationColumn in 0..4) updateClipboardCell(dao, startRow + rowOffset, destinationColumn, value)
+                                    if (destinationColumn in 0..4) updateClipboardCell(dao, startRow + rowOffset, destinationColumn, value, requiredRewardColumns, rewardAmountPaisa)
                                 }
                             }
                         }
@@ -673,10 +684,10 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                                     history.record("clipboard-cell-" + index + "-" + column, "Edit " + columnLetter(column) + (index + 1),
                                         undo = {
                                             if (existingRowId == null) dao.getClipboardSheetOnce().getOrNull(index)?.let { dao.deleteClipboardSheet(it.id) }
-                                            else updateClipboardCell(dao, index, column, previous)
+                                            else updateClipboardCell(dao, index, column, previous, requiredRewardColumns, rewardAmountPaisa)
                                         },
-                                        redo = { updateClipboardCell(dao, index, column, value) })
-                                    scope.launch { editMutex.withLock { updateClipboardCell(dao, index, column, value) } }
+                                        redo = { updateClipboardCell(dao, index, column, value, requiredRewardColumns, rewardAmountPaisa) })
+                                    scope.launch { editMutex.withLock { updateClipboardCell(dao, index, column, value, requiredRewardColumns, rewardAmountPaisa) } }
                                 }
                             )
                         }
@@ -706,8 +717,8 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
                     showPurgeDialog = false
                     scope.launch {
                         val before = dao.getClipboardSheetOnce()
-                        dao.deleteAllClipboardSheet()
-                        history.record("clipboard-purge", "Purge clipboard sheet", undo = { dao.restoreClipboardSheet(before) }, redo = { dao.deleteAllClipboardSheet() })
+                        dao.restoreClipboardSheet(emptyList())
+                        history.record("clipboard-purge", "Purge clipboard sheet", undo = { dao.restoreClipboardSheet(before) }, redo = { dao.restoreClipboardSheet(emptyList()) })
                         selectedRowIds.clear()
                         ClipboardTools.toast(context, "All Clipboard Sheet records deleted. Undo is available.")
                     }
@@ -1019,7 +1030,9 @@ private suspend fun updateClipboardCell(
     dao: FloatClipDao,
     rowIndex: Int,
     column: Int,
-    value: String
+    value: String,
+    requiredColumns: List<String>,
+    rewardAmountPaisa: Long
 ) {
     var rows = dao.getClipboardSheetOnce()
     while (rows.size <= rowIndex) {
@@ -1036,6 +1049,7 @@ private suspend fun updateClipboardCell(
         else -> row.copy(colE = value)
     }
     dao.updateClipboardSheet(updated)
+    dao.rewardClipboardRowIfComplete(row.id, requiredColumns, rewardAmountPaisa)
 }
 
 private fun buildCsv(headers: List<String>, rows: List<List<String>>): String {
