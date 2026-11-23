@@ -6,6 +6,7 @@ import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Insert
+import androidx.room.Index
 import androidx.room.OnConflictStrategy
 import androidx.room.Transaction
 import androidx.room.PrimaryKey
@@ -51,6 +52,21 @@ data class ClipboardSheetEntity(
     @ColumnInfo(defaultValue = "''") val colC: String = "",
     @ColumnInfo(defaultValue = "''") val colD: String = "",
     @ColumnInfo(defaultValue = "''") val colE: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val rewardAmountPaisa: Long = 0,
+    val rewardedAt: Long? = null
+)
+
+@Entity(
+    tableName = "balance_transactions",
+    indices = [Index(value = ["rowId", "type"], unique = true)]
+)
+data class BalanceTransactionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val rowId: Long,
+    val rowNumber: Int,
+    val amountPaisa: Long,
+    val type: String,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -149,6 +165,9 @@ interface FloatClipDao {
     @Query("SELECT MAX(position) FROM clipboard_sheet")
     suspend fun maxClipboardSheetPosition(): Int?
 
+    @Query("SELECT * FROM clipboard_sheet WHERE id = :id LIMIT 1")
+    suspend fun getClipboardSheetById(id: Long): ClipboardSheetEntity?
+
     @Insert
     suspend fun insertClipboardSheet(item: ClipboardSheetEntity): Long
 
@@ -156,7 +175,7 @@ interface FloatClipDao {
     suspend fun updateClipboardSheet(item: ClipboardSheetEntity)
 
     @Query("DELETE FROM clipboard_sheet WHERE id = :id")
-    suspend fun deleteClipboardSheet(id: Long)
+    suspend fun deleteClipboardSheetRow(id: Long)
 
     @Query("DELETE FROM clipboard_sheet")
     suspend fun deleteAllClipboardSheet()
@@ -164,16 +183,102 @@ interface FloatClipDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertClipboardSheets(items: List<ClipboardSheetEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertBalanceTransaction(item: BalanceTransactionEntity): Long
+
+    @Query("DELETE FROM balance_transactions WHERE rowId = :rowId AND type = 'REVERSAL'")
+    suspend fun deleteBalanceReversal(rowId: Long)
+
+    @Query("SELECT * FROM balance_transactions ORDER BY createdAt DESC, id DESC")
+    fun observeBalanceTransactions(): Flow<List<BalanceTransactionEntity>>
+
+    @Query("SELECT COALESCE(SUM(amountPaisa), 0) FROM balance_transactions")
+    fun observeTotalBalancePaisa(): Flow<Long>
+
+    @Transaction
+    suspend fun rewardClipboardRowIfComplete(
+        rowId: Long,
+        requiredColumns: List<String>,
+        rewardAmountPaisa: Long
+    ): Long {
+        if (requiredColumns.isEmpty() || rewardAmountPaisa <= 0L) return 0L
+        val row = getClipboardSheetById(rowId) ?: return 0L
+        if (row.rewardAmountPaisa > 0L) return 0L
+
+        val complete = requiredColumns.all { column ->
+            when (column) {
+                "A" -> row.colA.isNotBlank()
+                "B" -> row.colB.isNotBlank()
+                "C" -> row.colC.isNotBlank()
+                "D" -> row.colD.isNotBlank()
+                "E" -> row.colE.isNotBlank()
+                else -> false
+            }
+        }
+        if (!complete) return 0L
+
+        val now = System.currentTimeMillis()
+        updateClipboardSheet(row.copy(rewardAmountPaisa = rewardAmountPaisa, rewardedAt = now))
+        insertBalanceTransaction(
+            BalanceTransactionEntity(
+                rowId = row.id,
+                rowNumber = row.position + 1,
+                amountPaisa = rewardAmountPaisa,
+                type = "EARN",
+                createdAt = now
+            )
+        )
+        return rewardAmountPaisa
+    }
+
+    @Transaction
+    suspend fun deleteClipboardSheet(id: Long) {
+        val row = getClipboardSheetById(id)
+        if (row != null && row.rewardAmountPaisa > 0L) {
+            insertBalanceTransaction(
+                BalanceTransactionEntity(
+                    rowId = row.id,
+                    rowNumber = row.position + 1,
+                    amountPaisa = -row.rewardAmountPaisa,
+                    type = "REVERSAL"
+                )
+            )
+        }
+        deleteClipboardSheetRow(id)
+    }
+
     @Transaction
     suspend fun restoreClipboardSheet(items: List<ClipboardSheetEntity>) {
+        val existing = getClipboardSheetOnce()
+        val targetIds = items.map { it.id }.toSet()
+
+        existing.filter { it.rewardAmountPaisa > 0L && it.id !in targetIds }.forEach { row ->
+            insertBalanceTransaction(
+                BalanceTransactionEntity(
+                    rowId = row.id,
+                    rowNumber = row.position + 1,
+                    amountPaisa = -row.rewardAmountPaisa,
+                    type = "REVERSAL"
+                )
+            )
+        }
+        items.filter { it.rewardAmountPaisa > 0L }.forEach { row ->
+            deleteBalanceReversal(row.id)
+        }
+
         deleteAllClipboardSheet()
         if (items.isNotEmpty()) insertClipboardSheets(items)
     }
 }
 
 @Database(
-    entities = [QuickTextEntity::class, SavedClipboardEntity::class, ClipboardSheetEntity::class],
-    version = 5,
+    entities = [
+        QuickTextEntity::class,
+        SavedClipboardEntity::class,
+        ClipboardSheetEntity::class,
+        BalanceTransactionEntity::class
+    ],
+    version = 6,
     exportSchema = false
 )
 abstract class FloatClipDatabase : RoomDatabase() {
@@ -231,6 +336,28 @@ abstract class FloatClipDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE clipboard_sheet ADD COLUMN rewardAmountPaisa INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL("ALTER TABLE clipboard_sheet ADD COLUMN rewardedAt INTEGER")
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS balance_transactions (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "rowId INTEGER NOT NULL, " +
+                        "rowNumber INTEGER NOT NULL, " +
+                        "amountPaisa INTEGER NOT NULL, " +
+                        "type TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL)"
+                )
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_balance_transactions_rowId_type " +
+                        "ON balance_transactions (rowId, type)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: FloatClipDatabase? = null
 
@@ -241,7 +368,7 @@ abstract class FloatClipDatabase : RoomDatabase() {
                     FloatClipDatabase::class.java,
                     "floatclip.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
