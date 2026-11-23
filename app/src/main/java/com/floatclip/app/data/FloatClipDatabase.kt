@@ -198,8 +198,9 @@ interface FloatClipDao {
         requiredColumns: List<String>,
         rewardAmountPaisa: Long
     ): Long {
+        if (requiredColumns.isEmpty()) return 0L
         val row = getClipboardSheetById(rowId) ?: return 0L
-        val complete = requiredColumns.isNotEmpty() && requiredColumns.all { column ->
+        val complete = requiredColumns.all { column ->
             when (column) {
                 "A" -> row.colA.isNotBlank()
                 "B" -> row.colB.isNotBlank()
