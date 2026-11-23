@@ -342,7 +342,11 @@ private fun BubbleSettingsScreen(dao: FloatClipDao) {
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    if (transaction.type == "REVERSAL") "Row ${transaction.rowNumber} reversed" else "Row ${transaction.rowNumber} completed",
+                                    when (transaction.type) {
+                                        "REVERSAL" -> "Row ${transaction.rowNumber} reversed"
+                                        "RESTORE" -> "Row ${transaction.rowNumber} restored"
+                                        else -> "Row ${transaction.rowNumber} completed"
+                                    },
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp
                                 )
