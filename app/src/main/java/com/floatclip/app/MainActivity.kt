@@ -556,10 +556,11 @@ private fun parseTakaToPaisa(input: String): Long? {
 
 private fun formatTakaBalance(amountPaisa: Long, compact: Boolean = false): String {
     val amount = amountPaisa / 100.0
-    val value = if (compact && amount >= 100_000.0) {
-        String.format(Locale.US, "%.1fK", amount / 1_000.0)
-    } else {
-        String.format(Locale.US, "%,.2f", amount)
+    val value = when {
+        compact && amount >= 1_000_000.0 -> String.format(Locale.US, "%.1fM", amount / 1_000_000.0)
+        compact && amount >= 10_000.0 -> String.format(Locale.US, "%.0fK", amount / 1_000.0)
+        compact && amount >= 1_000.0 -> String.format(Locale.US, "%.1fK", amount / 1_000.0)
+        else -> String.format(Locale.US, "%,.2f", amount)
     }
     return "৳" + value
 }
