@@ -160,17 +160,6 @@ fun QuickTextSpreadsheet(items: List<QuickTextEntity>, dao: FloatClipDao, queue:
     val scope = rememberCoroutineScope()
     val horizontalState = rememberScrollState()
     val editMutex = remember { Mutex() }
-    val rewardPreferences = remember(context) {
-        context.getSharedPreferences("floatclip_bubble", Context.MODE_PRIVATE)
-    }
-    val requiredRewardColumns = buildList {
-        if (rewardPreferences.getBoolean("show_bubble_button_a", true)) add("A")
-        if (rewardPreferences.getBoolean("show_bubble_button_b", true)) add("B")
-        if (rewardPreferences.getBoolean("show_bubble_button_c", true)) add("C")
-        if (rewardPreferences.getBoolean("show_bubble_button_d", true)) add("D")
-        if (rewardPreferences.getBoolean("show_bubble_button_e", true)) add("E")
-    }
-    val rewardAmountPaisa = rewardPreferences.getLong("reward_per_completed_row_paisa", 0L).coerceAtLeast(0L)
     var paletteIndex by remember { mutableStateOf(0) }
     var selection by remember(queue) { mutableStateOf(SheetSelection()) }
     var rangeSelectMode by remember(queue) { mutableStateOf(false) }
@@ -434,6 +423,17 @@ fun ClipboardSheetSpreadsheet(items: List<ClipboardSheetEntity>, dao: FloatClipD
     val scope = rememberCoroutineScope()
     val horizontalState = rememberScrollState()
     val editMutex = remember { Mutex() }
+    val rewardPreferences = remember(context) {
+        context.getSharedPreferences("floatclip_bubble", Context.MODE_PRIVATE)
+    }
+    val requiredRewardColumns = buildList {
+        if (rewardPreferences.getBoolean("show_bubble_button_a", true)) add("A")
+        if (rewardPreferences.getBoolean("show_bubble_button_b", true)) add("B")
+        if (rewardPreferences.getBoolean("show_bubble_button_c", true)) add("C")
+        if (rewardPreferences.getBoolean("show_bubble_button_d", true)) add("D")
+        if (rewardPreferences.getBoolean("show_bubble_button_e", true)) add("E")
+    }
+    val rewardAmountPaisa = rewardPreferences.getLong("reward_per_completed_row_paisa", 0L).coerceAtLeast(0L)
     var paletteIndex by remember { mutableStateOf(0) }
     var selection by remember { mutableStateOf(SheetSelection()) }
     var rangeSelectMode by remember { mutableStateOf(false) }
